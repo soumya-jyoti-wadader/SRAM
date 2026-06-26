@@ -179,6 +179,40 @@ assign data_out = (LATENCY == 1) ? data_out_int    :
                   (LATENCY == 4) ? data_out_dly[2] :
                                    data_out_dly[3];
 
-// implement write block and forcex block
+always @ (posedge clk) begin
+    if (chip_select_dly & write_dly & ~global_reset & ~forcex)
+    begin
+        data_tmp = memory[addr_dly];            // Read current word
+        for (i=0; i<COLS; i=i+1)
+        begin
+            if (enables_dly[i])
+                data_tmp[i] = data_in_dly[i];   // Apply masked bits only
+        end
+        memory[addr_dly] = data_tmp;            // Write back modified word
+    end
+end
+
+// ----------------------------------------------------------------
+// ForceX Block — Simulation-only Memory Corruption
+// Floods entire memory array with X when forcex is asserted.
+// Intent: expose don't-care or uninitialized read behavior
+//         in simulation by making X propagation visible.
+// NOTE: Not synthesizable — purely behavioral/simulation construct.
+//       forcex is tied to 1'b0 so synthesis tools will optimize away.
+// ----------------------------------------------------------------
+always @(forcex)
+    if (forcex)
+    begin
+        for (i=0; i<COLS; i=i+1)
+        begin
+            data_tmp[i] = 1'bx;
+        end
+
+        for (i=0; i<ROWS; i=i+1)
+        begin
+            memory[i] = data_tmp;
+        end
+    end
+
 endmodule
 
