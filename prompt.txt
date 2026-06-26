@@ -18,6 +18,7 @@ use only i and j integers already declared
 The design has a missing Stage 1 read pipeline register logic — the data_out_int register is declared and exists in the pipeline chain but its conditional assignment logic is completely absent, meaning the first pipeline stage is never driven.
 Macro `POR_MEM_DELAY — already defined, must be used on every assignment to data_out_int.
 A single clocked always block triggered on posedge clk_inst that conditionally drives data_out_int based on whether the current operation is a write or anything else.
+The condition is chip_select_dly & write_dly evaluated together — both must be true simultaneously.
 
 The design has a missing the final output assignment. A single continuous assignment that connects final output to the correct pipeline stage tap based on the value of LATENCY. 
 
