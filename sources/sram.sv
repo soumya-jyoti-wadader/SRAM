@@ -173,12 +173,6 @@ always @ (posedge clk_inst or posedge global_reset)
         end
     end
 
-assign data_out = (LATENCY == 1) ? data_out_int    :
-                  (LATENCY == 2) ? data_out_dly[0] :
-                  (LATENCY == 3) ? data_out_dly[1] :
-                  (LATENCY == 4) ? data_out_dly[2] :
-                                   data_out_dly[3];
-
 // implement write block and forcex block
 endmodule
 
