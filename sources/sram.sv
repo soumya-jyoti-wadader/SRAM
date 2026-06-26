@@ -116,11 +116,6 @@ assign wren = chip_select_dly &  write_dly;
 // ----------------------------------------------------------------
 // Read Path — Stage 1 Register (clk_inst)
 //
-// Behavior:
-//   READ  cycle (chip_select=1, write_enable=0) → capture data_outi  ✅
-//   WRITE cycle (chip_select=1, write_enable=1) → inject X           ✅
-//   IDLE  cycle (chip_select=0)                 → inject X           ✅
-//
 // X injection on non-read cycles is intentional — it propagates
 // through the pipeline and makes any incorrect read timing
 // immediately visible in simulation as X on data_out
