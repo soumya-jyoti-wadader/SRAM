@@ -1,8 +1,3 @@
-`timescale 1ns/1ns
-
-`define POR_HLD_DELAY  #0.1
-`define POR_MEM_DELAY  #0.2
-
 module sram (
                 data_out,
                 addr,
@@ -27,7 +22,7 @@ parameter ROWS          = 1024,
 // Port Declarations
 // ----------------------------------------------------------------
 input  [ADDR_WIDTH-1:0]    addr;
-input  [COLS-1:0]          data_in;         
+input  [COLS-1:0]          data_in;      
 input                      chip_select;
 input                      write_enable;
 input  [WR_MASK_WIDTH-1:0] write_mask;
@@ -71,6 +66,15 @@ assign `POR_HLD_DELAY write_dly       = write_enable;
 
 assign forcex = 1'b0;
 
+// ----------------------------------------------------------------
+// Write Mask Expansion (Combinatorial)
+// Expands WR_MASK_WIDTH-bit mask into COLS-bit enables_expand
+// based on WR_MASK_TYPE granularity:
+//   0 = no mask    (full word write always enabled)
+//   1 = bit-wise   (1 mask bit per data bit)
+//   8 = byte-wise  (1 mask bit per 8 data bits)
+//   N = N-bit gran (1 mask bit per N data bits)
+// ----------------------------------------------------------------
 always @(write_mask)
     case (WR_MASK_TYPE)
         0: enables_expand = {COLS{1'b1}};
@@ -111,11 +115,20 @@ assign wren = chip_select_dly &  write_dly;
 
 // ----------------------------------------------------------------
 // Read Path — Stage 1 Register (clk_inst)
+//
+// Behavior:
+//   READ  cycle (chip_select=1, write_enable=0) → capture data_outi  ✅
+//   WRITE cycle (chip_select=1, write_enable=1) → inject X           ✅
+//   IDLE  cycle (chip_select=0)                 → inject X           ✅
+//
+// X injection on non-read cycles is intentional — it propagates
+// through the pipeline and makes any incorrect read timing
+// immediately visible in simulation as X on data_out
 // ----------------------------------------------------------------
 reg [COLS-1:0] data_out_int;
 
 always @ (posedge clk_inst) begin
-    if (chip_select_dly & write_dly)
+    if (chip_select_dly & ~write_dly)       
         data_out_int <= `POR_MEM_DELAY data_outi;
     else
         data_out_int <= `POR_MEM_DELAY {COLS{1'bx}};
@@ -123,6 +136,8 @@ end
 
 // ----------------------------------------------------------------
 // Read/Write Enable Pipeline Shift Registers + data_out_dly
+// Provides LATENCY-configurable output pipeline on clk_inst
+// Supports LATENCY values 1 through 5
 // ----------------------------------------------------------------
 reg [3:0]      wren_dly;
 reg [3:0]      rden_dly;
@@ -154,6 +169,7 @@ always @ (posedge clk_inst or posedge global_reset)
             data_out_dly[3] <= {COLS{1'b0}};
         end
         else begin
+            // Shift enable pipelines
             wren_dly[0] <= wren;
             wren_dly[1] <= wren_dly[0];
             wren_dly[2] <= wren_dly[1];
@@ -173,12 +189,28 @@ always @ (posedge clk_inst or posedge global_reset)
         end
     end
 
+// ----------------------------------------------------------------
+// data_out Assignment — Parameterized Latency Tap
+//
+// LATENCY = 1 : data_out_int        (1 clk_inst cycle after addr)
+// LATENCY = 2 : data_out_dly[0]     (2 clk_inst cycles after addr)
+// LATENCY = 3 : data_out_dly[1]     (3 clk_inst cycles after addr)
+// LATENCY = 4 : data_out_dly[2]     (4 clk_inst cycles after addr)
+// LATENCY = 5 : data_out_dly[3]     (5 clk_inst cycles after addr)
+// ----------------------------------------------------------------
 assign data_out = (LATENCY == 1) ? data_out_int    :
                   (LATENCY == 2) ? data_out_dly[0] :
                   (LATENCY == 3) ? data_out_dly[1] :
                   (LATENCY == 4) ? data_out_dly[2] :
                                    data_out_dly[3];
 
+// ----------------------------------------------------------------
+// Write Path — Core Memory Write (clk domain)
+// Read-modify-write using data_tmp to preserve unmasked bits
+// Blocking assignments used intentionally for sequential
+// read-modify-write within a single always block
+// Gated by: chip_select_dly, write_dly, global_reset, forcex
+// ----------------------------------------------------------------
 always @ (posedge clk) begin
     if (chip_select_dly & write_dly & ~global_reset & ~forcex)
     begin
