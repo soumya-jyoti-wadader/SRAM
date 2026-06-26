@@ -1,0 +1,26 @@
+Complete the implementation in sources/sram.sv
+
+There two blocks are missing 1) write block 2) forceX block
+
+Block 1 — Reconstruct the Write Path Always Block
+
+Trigger on the correct clock edge — identify which of the two clocks owns the write path
+Gate the entire write operation using all four conditions: chip_select_dly, write_dly, ~global_reset, ~forcex — all must be true simultaneously
+
+Implement a read-modify-write sequence in this exact order using data_tmp as the intermediate register:
+Step 1: Read the current word from memory[addr_dly] into data_tmp
+Step 2: Loop over every bit position from 0 to COLS — use the parameter, not a hardcoded value — and update data_tmp[i] with data_in_dly[i] only if enables_dly[i] is high
+Step 3: Write data_tmp back into memory[addr_dly]
+
+Block 2 — Reconstruct the ForceX Always Block
+
+Trigger combinatorially on forcex only — no clock, no reset
+When forcex is asserted, execute two sequential operations:
+
+Loop from 0 to COLS and assign 1'bx into every bit of data_tmp
+Loop from 0 to ROWS and write that all-X data_tmp into every row of memory
+Ensure loop bounds use COLS and ROWS parameters — never hardcoded integers
+Do not redeclare any signal — all variables already exist in the module
+No non-blocking assignments anywhere in either block
+No hardcoded bit widths or loop bounds — every bound must reference a parameter
+No new sensitivity list entries beyond what is architecturally required
