@@ -93,12 +93,6 @@ assign wren = chip_select_dly &  write_dly;
 // ----------------------------------------------------------------
 reg [COLS-1:0] data_out_int;
 
-always @ (posedge clk_inst) begin
-    if (chip_select_dly & write_dly)
-        data_out_int <= `POR_MEM_DELAY data_outi;
-    else
-        data_out_int <= `POR_MEM_DELAY {COLS{1'bx}};
-end
 
 // ----------------------------------------------------------------
 // Read/Write Enable Pipeline Shift Registers + data_out_dly
