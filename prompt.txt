@@ -1,5 +1,7 @@
 Complete the implementation in sources/sram.sv
 
+The design has a missing the final output assignment. A single continuous assignment that connects final output to the correct pipeline stage tap based on the value of LATENCY. 
+
 There two blocks are missing 1) write block 2) forceX block
 
 Block 1 — Reconstruct the Write Path Always Block
