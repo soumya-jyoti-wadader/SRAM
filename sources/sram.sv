@@ -71,27 +71,6 @@ assign `POR_HLD_DELAY write_dly       = write_enable;
 
 assign forcex = 1'b0;
 
-always @(write_mask)
-    case (WR_MASK_TYPE)
-        0: enables_expand = {COLS{1'b1}};
-        1: enables_expand = write_mask;
-        8:
-        begin
-            enables_expand = {COLS{1'b0}};
-            for (i=0; i<WR_MASK_WIDTH; i=i+1)
-                enables_expand = enables_expand | ({8{write_mask[i]}} << (i << 3));
-        end
-        default:
-        begin
-            enables_expand = {COLS{1'b0}};
-            for (i=0; i<WR_MASK_WIDTH; i=i+1)
-            begin
-                for (j=0; j<WR_MASK_TYPE; j=j+1)
-                    enables_expand = enables_expand | write_mask[i] << (i * WR_MASK_TYPE + j);
-            end
-        end
-    endcase
-
 assign `POR_HLD_DELAY enables_dly = enables_expand;
 
 // ----------------------------------------------------------------
