@@ -3,7 +3,7 @@ name = "sram"
 version = "0.1.0"
 description = "SRAM cocotb evaluation problem"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.14"
 dependencies = [
     "cocotb>=2.0.0",
     "cocotb-tools>=0.1.0",
