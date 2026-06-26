@@ -12,20 +12,12 @@ Use a combinatorial always block with write_mask as the sole sensitivity list en
 Use a case statement on WR_MASK_TYPE to select between the four modes
 For cases 8 and default, initialize enables_expand to {COLS{1'b0}} before the loop — never assume a prior value
 All loop bounds must use WR_MASK_WIDTH and WR_MASK_TYPE parameters — no hardcoded integers
-Use blocking assignments throughout — this is combinatorial logic
-No new signal declarations — use only i and j integers already declared
+this is combinatorial logic
+use only i and j integers already declared
 
-Detailed logic for each non-trivial case:
-Case 8 — Byte-wise mask:
-For each mask bit i from 0 to WR_MASK_WIDTH:
-  Replicate write_mask[i] across 8 bits → {8{write_mask[i]}}
-  Shift left by (i × 8) positions → << (i << 3)
-  OR the result into enables_expand
-
-Case default — N-bit granularity:
-For each mask bit i from 0 to WR_MASK_WIDTH:
-  For each bit j from 0 to WR_MASK_TYPE:
-    OR write_mask[i] into enables_expand at position (i × WR_MASK_TYPE + j)
+The design has a missing Stage 1 read pipeline register logic — the data_out_int register is declared and exists in the pipeline chain but its conditional assignment logic is completely absent, meaning the first pipeline stage is never driven.
+Macro `POR_MEM_DELAY — already defined, must be used on every assignment to data_out_int.
+A single clocked always block triggered on posedge clk_inst that conditionally drives data_out_int based on whether the current operation is a write or anything else.
 
 The design has a missing the final output assignment. A single continuous assignment that connects final output to the correct pipeline stage tap based on the value of LATENCY. 
 
