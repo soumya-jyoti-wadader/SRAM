@@ -5,11 +5,11 @@
 // annotated simulation. Kept empty for synthesis compatibility.
 // ----------------------------------------------------------------
 `ifndef POR_HLD_DELAY
-   `define POR_HLD_DELAY 0.1
+   `define POR_HLD_DELAY #0.1
 `endif
 
 `ifndef POR_MEM_DELAY
-   `define POR_MEM_DELAY 0.1
+   `define POR_MEM_DELAY #0.1
 `endif
 
 module sram (
