@@ -1,7 +1,11 @@
 [project]
 name = "sram"
 version = "0.1.0"
-description = "Add your description here"
+description = "SRAM cocotb evaluation problem"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "cocotb>=2.0.0",
+    "cocotb-tools>=0.1.0",
+    "pytest>=8.0.0",
+]
