@@ -1,3 +1,5 @@
+"""Cocotb testbench for sram.sv — SRAM with Hamming SECDED ECC."""
+
 from __future__ import annotations
 
 import os
@@ -14,9 +16,11 @@ from cocotb_tools.runner import get_runner
 # ---------------------------------------------------------------------------
 COLS = 8
 ROWS = 1024
+ADDR_WIDTH = 14
 LATENCY = 2
+ECC_BITS = 6
 CLK_PERIOD_NS = 10
-HOLD_DELAY_NS = 1  # > POR_HLD_DELAY (#0.1) and POR_MEM_DELAY (#0.2)
+HOLD_DELAY_NS = 1  # > POR_HLD_DELAY (#0.1) and POR_MEM_DELAY (#0.1)
 
 
 class SramModel:
@@ -84,10 +88,9 @@ async def write_then_readback(dut, addr: int, stored: int, probe: int) -> int:
     """
     Return the byte already in memory while starting a new write of *probe*.
 
-    Keep chip_select and write_enable asserted across both phases so the
-    read pipeline is not flushed to X between the storing write and the
-    readback sample.  With LATENCY=2 the pre-write value appears on
-    data_out one clk_inst cycle after the probe write begins.
+    Keep chip_select asserted across both phases so the read pipeline is not
+    flushed to X.  With LATENCY=2 the stored value appears on data_out after
+    the probe write begins and the pipeline fills.
     """
     dut.addr.value = addr
     dut.data_in.value = stored & 0xFF
@@ -97,8 +100,10 @@ async def write_then_readback(dut, addr: int, stored: int, probe: int) -> int:
     await RisingEdge(dut.clk)
 
     dut.data_in.value = probe & 0xFF
+    dut.write_enable.value = 0
     await Timer(HOLD_DELAY_NS, unit="ns")
-    await RisingEdge(dut.clk_inst)
+    for _ in range(LATENCY):
+        await RisingEdge(dut.clk_inst)
     await Timer(HOLD_DELAY_NS, unit="ns")
     return sample_output(dut)
 
@@ -111,12 +116,38 @@ async def finish_probe_write(dut) -> None:
     await Timer(HOLD_DELAY_NS, unit="ns")
 
 
+async def read_with_ecc_check(dut, addr: int, expected_data: int) -> tuple[int, int, int]:
+    """Perform a read and return (data_out, ecc_single_err, ecc_double_err)."""
+    dut.addr.value = addr
+    dut.data_in.value = 0
+    dut.write_mask.value = 0
+    dut.chip_select.value = 1
+    dut.write_enable.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(HOLD_DELAY_NS, unit="ns")
+    for _ in range(LATENCY):
+        await RisingEdge(dut.clk_inst)
+    await Timer(HOLD_DELAY_NS, unit="ns")
+
+    data = sample_output(dut)
+    single = int(dut.ecc_single_err.value)
+    double = int(dut.ecc_double_err.value)
+
+    dut.chip_select.value = 0
+    await Timer(HOLD_DELAY_NS, unit="ns")
+
+    assert data == expected_data, (
+        f"read addr {addr:#06x}: expected data {expected_data:#04x}, got {data:#04x}"
+    )
+    return data, single, double
+
+
 # ---------------------------------------------------------------------------
-# Cocotb tests
+# Cocotb tests — basic SRAM
 # ---------------------------------------------------------------------------
 @cocotb.test()
 async def sram_reset_test(dut):
-    """global_reset clears the output pipeline; data_out reads as zero."""
+    """global_reset clears ECC flags; read path works after reset."""
     await start_clocks(dut)
     await drive_idle(dut)
     dut.global_reset.value = 0
@@ -124,9 +155,13 @@ async def sram_reset_test(dut):
     await RisingEdge(dut.clk_inst)
     await apply_reset(dut)
 
-    assert sample_output(dut) == 0, (
-        f"expected data_out=0 after reset, got {sample_output(dut):#x}"
-    )
+    assert int(dut.ecc_single_err.value) == 0, "ecc_single_err should be 0 after reset"
+    assert int(dut.ecc_double_err.value) == 0, "ecc_double_err should be 0 after reset"
+    assert int(dut.ecc_err_addr.value) == 0, "ecc_err_addr should be 0 after reset"
+
+    await commit_write(dut, 0, 0)
+    data, _, _ = await read_with_ecc_check(dut, 0, 0)
+    assert data == 0, f"expected data_out=0 after reset+write, got {data:#x}"
 
 
 @cocotb.test()
@@ -210,9 +245,102 @@ async def sram_random_write_test(dut):
 
 
 # ---------------------------------------------------------------------------
+# Cocotb tests — ECC (sram.sv specific)
+# ---------------------------------------------------------------------------
+@cocotb.test()
+async def ecc_clean_read_no_flags_test(dut):
+    """Clean reads must not raise ECC error flags."""
+    await start_clocks(dut)
+    await apply_reset(dut)
+
+    addr = 0x0020
+    data = 0x5A
+    await commit_write(dut, addr, data)
+
+    _, single, double = await read_with_ecc_check(dut, addr, data)
+    assert single == 0, f"expected ecc_single_err=0, got {single}"
+    assert double == 0, f"expected ecc_double_err=0, got {double}"
+
+
+@cocotb.test()
+async def ecc_single_bit_correction_test(dut):
+    """Flip one stored data bit; ECC should correct and flag single error."""
+    await start_clocks(dut)
+    await apply_reset(dut)
+
+    addr = 0x0030
+    data = 0xC3
+    await commit_write(dut, addr, data)
+
+    stored_val = dut.memory[addr].value
+    if not stored_val.is_resolvable:
+        raise AssertionError("memory word contains X/Z after write")
+    stored = int(stored_val)
+
+    # Corrupt bit 2 of the data field (lower COLS bits of memory word)
+    corrupted = stored ^ (1 << 2)
+    dut.memory[addr].value = corrupted
+
+    dut.addr.value = addr
+    dut.chip_select.value = 1
+    dut.write_enable.value = 0
+    dut.write_mask.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(HOLD_DELAY_NS, unit="ns")
+    for _ in range(LATENCY):
+        await RisingEdge(dut.clk_inst)
+    await Timer(HOLD_DELAY_NS, unit="ns")
+
+    observed = sample_output(dut)
+    single = int(dut.ecc_single_err.value)
+    double = int(dut.ecc_double_err.value)
+
+    dut.chip_select.value = 0
+
+    assert observed == data, (
+        f"ECC correction failed: expected {data:#04x}, got {observed:#04x}"
+    )
+    assert single == 1, f"expected ecc_single_err=1, got {single}"
+    assert double == 0, f"expected ecc_double_err=0, got {double}"
+
+
+@cocotb.test()
+async def ecc_double_bit_detection_test(dut):
+    """Flip two stored data bits; ECC should flag double error."""
+    await start_clocks(dut)
+    await apply_reset(dut)
+
+    addr = 0x0040
+    data = 0x96
+    await commit_write(dut, addr, data)
+
+    stored_val = dut.memory[addr].value
+    if not stored_val.is_resolvable:
+        raise AssertionError("memory word contains X/Z after write")
+    stored = int(stored_val)
+    corrupted = stored ^ (1 << 1) ^ (1 << 4)
+    dut.memory[addr].value = corrupted
+
+    dut.addr.value = addr
+    dut.chip_select.value = 1
+    dut.write_enable.value = 0
+    dut.write_mask.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(HOLD_DELAY_NS, unit="ns")
+    for _ in range(LATENCY):
+        await RisingEdge(dut.clk_inst)
+    await Timer(HOLD_DELAY_NS, unit="ns")
+
+    double = int(dut.ecc_double_err.value)
+    dut.chip_select.value = 0
+
+    assert double == 1, f"expected ecc_double_err=1, got {double}"
+
+
+# ---------------------------------------------------------------------------
 # Pytest runner (invokes cocotb via cocotb_tools)
 # ---------------------------------------------------------------------------
-def test_simple_dff_hidden_runner():
+def test_sram_hidden_runner():
     sim = os.getenv("SIM", "icarus")
     proj_path = Path(__file__).resolve().parent.parent
 
