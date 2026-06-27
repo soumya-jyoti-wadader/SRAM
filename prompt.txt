@@ -1,5 +1,96 @@
 Complete the implementation in sources/sram.sv
 
+Add Hamming SECDED (Single-Error Correct, Double-Error Detect) ECC engine into an existing parameterized synchronous SRAM behavioral model. Please follow the instruction to implement this block.
+Mathematical Basis — Hamming SECDED :
+1) For COLS data bits, the number of Hamming parity bits P satisfies by this formula "2^P  >=  COLS + P + 1", for example if COLS 8, P = 5, +1 overall (SECDED), Total ECC_BITS 6, Total stored 14. In this design ECC_BITS = 6 is defined as a macro for COLS=8. If COLS changes, ECC_BITS must be recalculated.
+2) Parity Bit Coverage Rule:
+Each parity bit Pi covers all bit positions in the codeword where bit i of the position number equals 1:
+P1  (i=0): covers positions 1, 3, 5, 7,  9, 11, ...
+P2  (i=1): covers positions 2, 3, 6, 7, 10, 11, ...
+P4  (i=2): covers positions 4, 5, 6, 7, 12, 13, ...
+P8  (i=3): covers positions 8, 9,10,11, 12, 13, ...
+P16 (i=4): covers positions 16,17,18,19,20, 21, ...
+P_overall: XOR of ALL bits including all parity bits (SECDED extra bit)
+3) Syndrome Decoding Table
+syndrome[4:0]  overall_parity[5]   Meaning
+─────────────────────────────────────────────────────
+00000          0                   No error
+00000          1                   Overall parity bit flipped — no data fix needed
+Non-zero       1                   Single-bit error — syndrome = exact bit position
+Non-zero       0                   Double-bit error — uncorrectable, flag fatal
+
+Memory Array Change — Required First Step
+Before implementing any ECC logic, the memory array declaration must be widened to store parity bits alongside data.
+reg [COLS+`ECC_BITS-1:0]    memory[ROWS-1:0];
+
+Description of each block for ECC logic.
+Block 1 — ECC Write Parity Computation (Combinatorial)
+What this block does:
+Computes all Hamming parity bits over data_in_dly every time data_in_dly changes. Result is stored in wr_parity and used by the write path always block when committing data to memory.
+Coding Rules:
+Use always @(*) with a named block label ecc_write_parity
+Declare a local integer b for the loop — do not use module-level i or j
+Initialize wr_parity to all zeros at the top of the block before the loop
+Gate entire computation with if (ECC_EN) — when ECC_EN=0, parity stays zero and no overhead is added
+Use blocking assignments throughout — purely combinatorial
+All loop bounds must use COLS parameter — no hardcoded integers
+The overall parity bit wr_parity[5] must be computed after wr_parity[4:0] — order matters
+Implementation Step by Step:
+Step 1: Initialize wr_parity to zero
+Step 2: Loop over all COLS data bits. For each bit b, check which parity bits it contributes to using the coverage rule — if bit i of position (b+1) is 1, XOR data_in_dly[b] into wr_parity[i]
+Step 3: Compute the overall SECDED parity bit — XOR of all data bits and all Hamming parity bits computed so far
+
+8. Block 2 — ECC Read Syndrome Computation and Correction (Combinatorial)
+What this block does:
+On every read, recomputes Hamming parity over the stored data word, XORs it against the stored parity to produce a syndrome, then uses the syndrome to detect and correct errors. Produces rd_data_corrected which is the clean data delivered to the read pipeline.
+Coding Rules:
+Use always @(*) with a named block label ecc_read_correct
+Declare a local integer b — do not reuse module-level i or j
+Initialize ALL working registers at top of block — never rely on previous values
+Gate entire block with if (ECC_EN)
+Blocking assignments throughout
+Syndrome comparison must check [4:0] and [5] separately — never compare full 6-bit syndrome as one value
+Implementation Step by Step:
+Step 1: Extract raw data and stored parity from memory word
+rd_data_raw      = memory[addr_dly][COLS-1:0];
+rd_parity_stored = memory[addr_dly][COLS+`ECC_BITS-1:COLS];
+Step 2: Initialize all working registers:
+rd_syndrome       = {`ECC_BITS{1'b0}};
+rd_data_corrected = rd_data_raw;   // default: assume no error
+rd_single_err     = 1'b0;
+rd_double_err     = 1'b0;
+Step 3: Recompute syndrome parity bits [4:0] over rd_data_raw using identical coverage rule as write path
+Step 4: XOR recomputed parity against stored parity to produce syndrome
+Step 5: Compute overall parity check bit — XOR of raw data, stored Hamming parity, and stored overall parity
+Step 6: Decode the syndrome and act
+if (rd_syndrome[4:0] != 5'b0) begin
+    if (rd_syndrome[5]) begin
+        // Single-bit error — syndrome[4:0] = exact position of flipped bit
+        rd_single_err = 1'b1;
+        if (rd_syndrome[4:0] <= COLS)
+            rd_data_corrected[rd_syndrome[4:0]-1] =
+                ~rd_data_raw[rd_syndrome[4:0]-1];
+    end else begin
+        // Double-bit error — cannot correct, flag fatal
+        rd_double_err = 1'b1;
+    end
+end
+Why <= COLS guard? The syndrome may point to a parity bit position rather than a data bit position. Positions beyond COLS are parity bit positions — no data correction is needed, only the flag is raised.
+
+Block 3 — ECC Error Registration (Sequential)
+What this block does:
+Registers the combinatorial rd_single_err, rd_double_err signals on clk_inst so they are stable, glitch-free outputs. Captures the failing address when any error is detected.
+Coding Rules:
+
+Trigger on posedge clk_inst or posedge global_reset
+Active-high asynchronous reset — clears all error flags and address
+Only sample error signals during an active read cycle: chip_select_dly & ~write_dly
+Outside of read cycles, clear error flags — do not hold them
+Use non-blocking assignments throughout
+Update Write Path — Store Parity with Data. The existing write always block must be updated to store {wr_parity, data_tmp} instead of just data_tmp
+Update Stage 1 Read Pipeline — Use Corrected Data
+The Stage 1 read pipeline register must use data_outi_corrected instead of raw data_outi
+
 The design has a missing write mask expansion block — the enables_expand register is declared but never driven, meaning all write mask logic is completely absent from the design. What already exists in the code — do not modify or redeclare.
 A single combinatorial always block sensitive to write_mask that expands the incoming WR_MASK_WIDTH-bit mask into a full COLS-bit per-bit enable vector stored in enables_expand. This block must handle four distinct mask granularity modes selected by the WR_MASK_TYPE parameter.
 WR_MASK_TYPE : 0 Mask: No mask Required Logic: Force all bits of enables_expand to 1 — every bit is always writable regardless of write_mask
@@ -29,9 +120,9 @@ Trigger on the correct clock edge — identify which of the two clocks owns the 
 Gate the entire write operation using all four conditions: chip_select_dly, write_dly, ~global_reset, ~forcex — all must be true simultaneously
 
 Implement a read-modify-write sequence in this exact order using data_tmp as the intermediate register:
-Step 1: Read the current word from memory[addr_dly] into data_tmp
+Step 1: Read the current word from memory[addr_dly][COLS-1:0] into data_tmp
 Step 2: Loop over every bit position from 0 to COLS — use the parameter, not a hardcoded value — and update data_tmp[i] with data_in_dly[i] only if enables_dly[i] is high
-Step 3: Write data_tmp back into memory[addr_dly]
+Step 3: Write data_tmp back into memory[addr_dly] with freshly computed ECC parity
 
 Block 2 — Reconstruct the ForceX Always Block
 
@@ -45,3 +136,4 @@ Do not redeclare any signal — all variables already exist in the module
 No non-blocking assignments anywhere in either block
 No hardcoded bit widths or loop bounds — every bound must reference a parameter
 No new sensitivity list entries beyond what is architecturally required
+Should be ECC_BITS adjusted
