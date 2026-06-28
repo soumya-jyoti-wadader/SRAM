@@ -110,11 +110,30 @@ The design has a missing Stage 1 read pipeline register logic — the data_out_i
 Macro `POR_MEM_DELAY — already defined, must be used on every assignment to data_out_int.
 A single clocked always block triggered on posedge clk_inst that conditionally drives data_out_int based on whether the current operation is a write or anything else.
 
+The following sequential block is missing from a parameterized synchronous SRAM behavioral model. Implement it.
+
+ **Block:** `always @ (posedge clk_inst or posedge global_reset)`
+
+ **Reset branch** — active high async reset, clear:
+ - `wren_dly[3:0]` → `1'b0`
+ - `rden_dly[3:0]` → `1'b0`
+ - `chip_select_hold` → `1'b0`
+ - `data_out_dly[3:0]` → `{COLS{1'bx}}` — X not 0, consistent with pipeline X injection policy
+
+ **Else branch** — shift register chaining on `clk_inst`:
+ - `wren_dly` : shift `wren` through `[0]→[1]→[2]→[3]`
+ - `rden_dly` : shift `rden` through `[0]→[1]→[2]→[3]`
+ - `chip_select_hold` : sample `chip_select`
+ - `data_out_dly` : shift `data_out_int` through `[0]→[1]→[2]→[3]`
+
+ **Constraints:**
+ - Non-blocking assignments throughout
+ - `data_out_dly` feeds the parameterized `LATENCY` output tap — order of shifting is critical
+ - All signals already declared — do not redeclare anything
+
 The design has a missing the final output assignment. A single continuous assignment that connects final output to the correct pipeline stage tap based on the value of LATENCY. 
 
-There two blocks are missing 1) write block 2) forceX block
-
-Block 1 — Reconstruct the Write Path Always Block
+Impliment Reconstruct the Write Path Always Block
 
 Trigger on the correct clock edge — identify which of the two clocks owns the write path
 Gate the entire write operation using all four conditions: chip_select_dly, write_dly, ~global_reset, ~forcex — all must be true simultaneously
@@ -123,17 +142,3 @@ Implement a read-modify-write sequence in this exact order using data_tmp as the
 Step 1: Read the current word from memory[addr_dly][COLS-1:0] into data_tmp
 Step 2: Loop over every bit position from 0 to COLS — use the parameter, not a hardcoded value — and update data_tmp[i] with data_in_dly[i] only if enables_dly[i] is high
 Step 3: Write data_tmp back into memory[addr_dly] with freshly computed ECC parity
-
-Block 2 — Reconstruct the ForceX Always Block
-
-Trigger combinatorially on forcex only — no clock, no reset
-When forcex is asserted, execute two sequential operations:
-
-Loop from 0 to COLS and assign 1'bx into every bit of data_tmp
-Loop from 0 to ROWS and write that all-X data_tmp into every row of memory
-Ensure loop bounds use COLS and ROWS parameters — never hardcoded integers
-Do not redeclare any signal — all variables already exist in the module
-No non-blocking assignments anywhere in either block
-No hardcoded bit widths or loop bounds — every bound must reference a parameter
-No new sensitivity list entries beyond what is architecturally required
-Should be ECC_BITS adjusted

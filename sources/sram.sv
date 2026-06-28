@@ -165,38 +165,6 @@ reg [3:0]      rden_dly;
 reg [COLS-1:0] data_out_dly[3:0];
 reg            chip_select_hold;
 
-always @ (posedge clk_inst or posedge global_reset) begin
-    if (global_reset == 1'b1) begin
-        wren_dly[0]      <= 1'b0;
-        wren_dly[1]      <= 1'b0;
-        wren_dly[2]      <= 1'b0;
-        wren_dly[3]      <= 1'b0;
-        rden_dly[0]      <= 1'b0;
-        rden_dly[1]      <= 1'b0;
-        rden_dly[2]      <= 1'b0;
-        rden_dly[3]      <= 1'b0;
-        chip_select_hold <= 1'b0;
-        data_out_dly[0]  <= {COLS{1'bx}};
-        data_out_dly[1]  <= {COLS{1'bx}};
-        data_out_dly[2]  <= {COLS{1'bx}};
-        data_out_dly[3]  <= {COLS{1'bx}};
-    end else begin
-        wren_dly[0]      <= wren;
-        wren_dly[1]      <= wren_dly[0];
-        wren_dly[2]      <= wren_dly[1];
-        wren_dly[3]      <= wren_dly[2];
-        rden_dly[0]      <= rden;
-        rden_dly[1]      <= rden_dly[0];
-        rden_dly[2]      <= rden_dly[1];
-        rden_dly[3]      <= rden_dly[2];
-        chip_select_hold <= chip_select;
-        data_out_dly[0]  <= data_out_int;
-        data_out_dly[1]  <= data_out_dly[0];
-        data_out_dly[2]  <= data_out_dly[1];
-        data_out_dly[3]  <= data_out_dly[2];
-    end
-end
-
 // ================================================================
 // data_out — Parameterized Latency Tap
 // Output isolation applied when power gated
@@ -207,9 +175,4 @@ end
 // Write Path — Core Memory Write (clk domain)
 // ECC parity computed and stored alongside data
 // ================================================================
-
-// ================================================================
-// ForceX Block — Simulation only
-// ================================================================
-
 endmodule
