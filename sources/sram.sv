@@ -332,17 +332,4 @@ always @ (posedge clk) begin
         memory[addr_dly] = {wr_parity, data_tmp};
     end
 end
-
-// ================================================================
-// ForceX Block — Simulation only
-// ================================================================
-always @(forcex)
-    if (forcex) begin
-        for (i=0; i<COLS; i=i+1)
-            data_tmp[i] = 1'bx;
-        for (i=0; i<ROWS; i=i+1)
-            memory[i] = {{`ECC_BITS{1'bx}}, data_tmp};
-    end
-
 endmodule
-
